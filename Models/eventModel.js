@@ -26,6 +26,10 @@ const eventModel = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  fake_participants: {
+    type: Number,
+    default: 0
+  },
   sold_list: {
     type: Array,
     default: []

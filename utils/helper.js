@@ -1,7 +1,37 @@
 const axios = require('axios')
 const T = require("tesseract.js")
 const Stripe = require('stripe')
-const stripe = Stripe('sk_test_51MYavWFKy8Ssys2PIjzZHxwIgQgX1qVXLBKmuqeVXAWLMdSklmSUYzPt9wityvXRAHTl0fWSN2UiNx4X158goRmh00iBbJ8gF1')
+exports.sendNotification = async (to, message, jsonData) => {
+  await axios
+    .post(
+      "https://fcm.googleapis.com/fcm/send",
+      {
+        to,
+        priority: "high",
+        notification: {
+          title: message.title,
+          body: message.body,
+        },
+        android: {
+          priority: "high",
+        },
+        data: jsonData,
+        apns: {
+          headers: {
+            "apns-priority": 5,
+            "apns-topic": "com.demo",
+            "apns-push-type": "background",
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: "key=" + "AAAAF8mCBzw:APA91bGA2JJNRpSz0QbXmvlbBHtMAJz3gT7kU-gf-7a8Yb958tcOGWoMElywRi8Womj0rWJBpRyQakizQ9Sg6YC6OB5ncv1HWpaARxbfhaf1QxWpVsvYTYPtEm3nxvjDsfLfKogcjrsL",
+        },
+      }
+    )
+    .then((resp) => console.log("Notification sent: ", resp.data));
+};
 exports.generateOTP = () => {
   const four_digit = Math.floor(1000 + Math.random() * 9000)
   return four_digit

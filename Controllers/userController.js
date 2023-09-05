@@ -12,7 +12,7 @@ const Event = require("../Models/eventModel");
 const Ticket = require("../Models/ticketModel");
 const Noti = require("../Models/notificationModel");
 const PaymentMethod = require("../Models/paymentMethodModel");
-const stripe = Stripe('sk_test_51MYavWFKy8Ssys2PIjzZHxwIgQgX1qVXLBKmuqeVXAWLMdSklmSUYzPt9wityvXRAHTl0fWSN2UiNx4X158goRmh00iBbJ8gF1')
+const Admins = require("../Models/admins");
 var transporter = nodemailer.createTransport({
   host: "gmail",
   port: 587,
@@ -24,7 +24,21 @@ var transporter = nodemailer.createTransport({
 
 })
 exports.test = async (req, res) => {
-  return res.status(200).json({ success: true, otp: helper.generateOTP() })
+  try {
+    await helper.sendNotification(
+      'fC3WUffxSHmclpiTNOzIXF:APA91bFWubHkbzQLyQLCIzsfrk_-01Jnhv88L4xANfP4Js3HKK6bSNo8F-6SxnTWdjGSSgCe_BDlbm6rXn8IwA8FdaQx7WgrESMO-fsvo9iPiIRa7RikBQhxPsxLEkz8wGkLjjTkEJNn',
+      {
+        title: "New QR codes generated",
+        body: `${req.body.bagsCount} new bags have been successfully generated for you.`,
+      }
+    );
+    return res.status(200).json({ success: true, })
+
+  } catch (error) {
+    console.log(error)
+    return res.status(400).json({ success: false, })
+
+  }
 }
 exports.signup = async (req, res) => {
   try {
@@ -87,11 +101,57 @@ exports.signup = async (req, res) => {
   }
 };
 
-
+exports.admin_login = async (req, res) => {
+  try {
+    const { email, password } = req.body
+    const user = await Admins.findOne({
+      email, password
+    })
+    if (user) {
+      return res.status(200).json({ success: true })
+    } else {
+      return res.status(400).json({ success: false });
+    }
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+}
+exports.create_admin = async (req, res) => {
+  try {
+    const { email, password, key } = req.body
+    if (key !== "LoraBC") {
+      return res
+        .status(400)
+        .json({ success: false, message: "Un-Authorized" });
+    }
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please enter email" });
+    }
+    if (!password) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please enter password" });
+    }
+    const user = await Admins.findOne({
+      email
+    })
+    if (user) {
+      return res.status(400).json({ success: false, message: 'User Pre-Exists' })
+    } else {
+      const user = new Admins({ email, password })
+      await user.save()
+      return res.status(200).json({ success: true, message: 'User creater' });
+    }
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+}
 
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, fcm } = req.body;
     if (!email) {
       return res
         .status(400)
@@ -129,6 +189,8 @@ exports.login = async (req, res) => {
         if (unread) {
           noti_status = true
         }
+        user.fcm = fcm
+        await user.save()
         return res
           .status(200)
           .json({ success: true, message: "Login Success", user, token, deposits, withdraws, events, notifications, noti_status, payment_methods });
@@ -151,37 +213,43 @@ exports.login = async (req, res) => {
 };
 
 exports.loaduser = async (req, res) => {
-  const token = req.headers.token;
+  const { token, fcm } = req.headers;
   if (token) {
     var data = jwt_decode(token);
     try {
       const docs = await User.findById(data._id)
-      const events = await Event.aggregate([
-        {
-          $lookup: {
-            from: 'tickets',
-            localField: 'sold_list',
-            foreignField: 'ticket_number',
-            as: 'tickets',
-            pipeline: [
-              { $match: { user: docs._id } }
-            ]
-          }
-        }
-      ])
-      const deposits = await Deposit.find({ user: data._id })
-      const withdraws = await Withdraw.find({ user: data._id })
-      const notifications = await Noti.find({ user: data._id })
-      const unread = await Noti.findOne({ user: data._id, read: false })
-      const payment_methods = await PaymentMethod.find()
-      let noti_status = false
-      if (unread) {
-        noti_status = true
-      }
       if (docs) {
-        res.status(200).json({ success: true, user: docs, token: token, deposits, withdraws, events, notifications, noti_status, payment_methods })
+        const events = await Event.aggregate([
+          {
+            $lookup: {
+              from: 'tickets',
+              localField: 'sold_list',
+              foreignField: 'ticket_number',
+              as: 'tickets',
+              pipeline: [
+                { $match: { user: docs._id } }
+              ]
+            }
+          }
+        ])
+        const deposits = await Deposit.find({ user: data._id })
+        const withdraws = await Withdraw.find({ user: data._id })
+        const notifications = await Noti.find({ user: data._id })
+        const unread = await Noti.findOne({ user: data._id, read: false })
+        const payment_methods = await PaymentMethod.find()
+        let noti_status = false
+        if (unread) {
+          noti_status = true
+        }
+        docs.fcm = fcm
+        await docs.save()
+        if (docs) {
+          res.status(200).json({ success: true, user: docs, token: token, deposits, withdraws, events, notifications, noti_status, payment_methods })
+        } else {
+          res.status(400).json({ success: false })
+        }
       } else {
-        res.status(400).json({ success: false })
+        res.status(400).json({ success: false, message: "failed to get user" })
       }
     } catch (error) {
       console.log(error)
@@ -615,12 +683,21 @@ exports.admin_get_deposits = async (req, res) => {
 exports.approve_deposit = async (req, res) => {
   try {
     const item = req.body.item
-    await User.findByIdAndUpdate(item.user, { $inc: { balance: item.amount } })
+    const user = await User.findById(item.user)
+    user.balance = user.balance + item.amount
     const deposit = await Deposit.findById(item._id)
     deposit.status = "approved"
     await deposit.save()
     const noti = new Noti({ user: item.user, body: `Deposit of ${item.amount} approved.` })
     await noti.save()
+    await user.save()
+    await helper.sendNotification(
+      user.fcm,
+      {
+        title: "Deposit approved",
+        body: `Rs${item.amount} added to your account balance`,
+      }
+    );
     return res.status(200).json({ success: true, message: 'Deposit Approved', deposit })
   } catch (error) {
     console.log(error)
@@ -631,11 +708,19 @@ exports.approve_deposit = async (req, res) => {
 exports.reject_deposit = async (req, res) => {
   try {
     const item = req.body.item
+    const user = await User.findById(item.user)
     const deposit = await Deposit.findById(item._id)
     deposit.status = "rejected"
     await deposit.save()
     const noti = new Noti({ user: item.user, body: `Deposit of ${item.amount} rejected.` })
     await noti.save()
+    await helper.sendNotification(
+      user.fcm,
+      {
+        title: "Deposit rejected",
+        body: `Your deposit request for Rs${item.amount} is rejected`,
+      }
+    );
     return res.status(200).json({ success: true, message: 'Deposit Rejected', deposits })
   } catch (error) {
     console.log(error)
@@ -657,12 +742,19 @@ exports.admin_get_withdraws = async (req, res) => {
 exports.approve_withdraw = async (req, res) => {
   try {
     const item = req.body.item
+    const user = await User.findById(item.user)
     const withdraw = await Withdraw.findById(item._id)
-    console.log(withdraw)
     withdraw.status = "approved"
     await withdraw.save()
     const noti = new Noti({ user: item.user, body: `Withdraw of ${item.amount} approved.` })
     await noti.save()
+    await helper.sendNotification(
+      user.fcm,
+      {
+        title: "Withdraw approved",
+        body: `Your withdraw request for Rs${item.amount} is approved`,
+      }
+    );
     return res.status(200).json({ success: true, message: 'Withdraw Approved', withdraw })
   } catch (error) {
     console.log(error)
@@ -676,19 +768,27 @@ exports.reject_withdraw = async (req, res) => {
     const withdraw = await Withdraw.findById(item._id)
     withdraw.status = "rejected"
     await withdraw.save()
-    await User.findByIdAndUpdate(item.user, { $inc: { balance: item.amount } })
+    const user = await User.findById(item.user)
+    user.balance = item.balance
     const noti = new Noti({ user: item.user, body: `Withdraw of ${item.amount} rejected.` })
     await noti.save()
+    await user.save()
+    await helper.sendNotification(
+      user.fcm,
+      {
+        title: "Withdraw rejected",
+        body: `Your withdraw request for Rs${item.amount} is rejected`,
+      }
+    );
     return res.status(200).json({ success: true, message: 'Withdraw Rejected', withdraw })
   } catch (error) {
     console.log(error)
     return res.status(400).json({ success: false, message: error.message })
   }
 }
-
 exports.add_event = async (req, res) => {
   try {
-    const { name, description, deadline, starts_at, quota, price, image } = req.body
+    const { name, description, deadline, starts_at, quota, price, image, fake_participants } = req.body
     const start = new Date(starts_at)
     const end = new Date(deadline)
     if (!name) {
@@ -726,14 +826,177 @@ exports.add_event = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Please Upload Image" });
     }
-    const event = new Event({ name, description, starts_at: start.getTime(), deadline: end.getTime(), quota, price, image, sold: 0, sold_list: [], winners: [] })
+    if (!fake_participants || fake_participants <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter Valid Number of fake participants" });
+    }
+
+    const event = new Event({ name, fake_participants, description, starts_at: start.getTime(), deadline: end.getTime(), quota, price, image, sold: 0, sold_list: [], winners: [] })
     await event.save()
+    const users = await User.find()
+    for (let i = 0; i < users.length; i++) {
+      await helper.sendNotification(
+        users[i].fcm,
+        {
+          title: "New Event added",
+          body: `${event.name} is added to event list.`,
+        }
+      );
+    }
     return res.status(200).json({ success: true, message: 'Event added' })
   } catch (error) {
     console.log(error)
     return res.status(400).json({ success: false, message: error.message })
   }
 }
+exports.edit_event = async (req, res) => {
+  try {
+
+    const { name, description, deadline, starts_at, quota, price, image, id, fake_participants } = req.body
+    if (!name) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter Name" });
+    }
+    if (!description) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter description" });
+    }
+    if (!deadline) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter deadline" });
+    }
+    if (!starts_at) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter Starting date" });
+    }
+    if (!price) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter Price" });
+    }
+    if (!quota) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter quota" });
+    }
+    if (!image) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Upload Image" });
+    }
+    const event = await Event.findById(id)
+    if (!event) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Event not found in DB!" });
+    }
+    if (!fake_participants || fake_participants <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter Valid Number of fake participants" });
+    }
+    event.name = name
+    event.description = description
+    event.price = price
+    event.quota = quota
+    event.starts_at = starts_at
+    event.deadline = deadline
+    event.image = image
+    event.fake_participants = fake_participants
+    await event.save()
+    return res.status(200).json({ success: true, message: 'Event edited' })
+  } catch (error) {
+    console.log(error)
+    return res.status(400).json({ success: false, message: error.message })
+  }
+}
+
+exports.edit_user = async (req, res) => {
+  try {
+    const { name, email, phone, city, balance, password, id } = req.body
+    if (!name) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter Name" });
+    }
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter email" });
+    }
+    if (!phone) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter phone" });
+    }
+    if (!city) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter city" });
+    }
+    if (!balance) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please Enter balance" });
+    }
+    const user = await User.findById(id)
+    if (!user) {
+      return res
+        .status(400)
+        .json({ success: false, message: "User not found in DB!" });
+    }
+    if (password) {
+      if (password.length < 8) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Password must be at least 8 characters" });
+      }
+      const p = await bcrypt.hash(password, 12);
+      user.password = p
+    }
+    user.name = name
+    user.email = email
+    user.phone = phone
+    user.city = city
+    user.balance = balance
+    await user.save()
+    return res.status(200).json({ success: true, message: 'User data edited' })
+  } catch (error) {
+    console.log(error)
+    return res.status(400).json({ success: false, message: error.message })
+  }
+}
+
+
+exports.admin_delete_event = async (req, res) => {
+  try {
+    const item = req.body.item
+    await Event.findByIdAndDelete(item._id)
+    return res.status(200).json({ success: true, message: 'Event deleted' })
+  } catch (error) {
+    console.log(error)
+    return res.status(400).json({ success: false, message: error.message })
+  }
+}
+
+exports.admin_delete_user = async (req, res) => {
+  try {
+    const item = req.body.item
+    await User.findByIdAndDelete(item._id)
+    return res.status(200).json({ success: true, message: 'User deleted' })
+  } catch (error) {
+    console.log(error)
+    return res.status(400).json({ success: false, message: error.message })
+  }
+}
+
+
+
 exports.load_expired_events = async (req, res) => {
   try {
     let date = new Date()
@@ -748,15 +1011,32 @@ exports.load_expired_events = async (req, res) => {
 
 exports.draw = async (req, res) => {
   try {
-    const { item, number_of_winners } = req.body
-    if (!number_of_winners) {
+    const { item, number_of_winners, custom_winners } = req.body
+    console.log(custom_winners)
+    if (!number_of_winners && custom_winners.length === 0) {
       return res.status(400).json({ success: false, message: "Enter number of winners" })
     }
-    if (number_of_winners < 1) {
+    if (number_of_winners < 0) {
       return res.status(400).json({ success: false, message: "Number of winners must be greter than 0" })
     }
     const event = await Event.findById(item._id)
     let winners = []
+    if (custom_winners.length > 0) {
+      for (let i = 0; i < custom_winners.length; i++) {
+        let winner = await Ticket.aggregate([
+          { $match: { ticket_number: custom_winners[i] } },
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'user',
+              foreignField: '_id',
+              as: 'user'
+            }
+          }
+        ])
+        winners.push(winner)
+      }
+    }
     for (let i = 0; i < number_of_winners; i++) {
       const random = Math.floor((Math.random() * event.sold))
       if (winners.some(item => item[0]?.ticket_number === event.sold_list[random])) {
@@ -829,3 +1109,26 @@ exports.del_payment_method = async (req, res) => {
     return res.status(400).json({ success: false, message: error.message })
   }
 }
+
+exports.admin_get_events = async (req, res) => {
+  try {
+    const events = await Event.find()
+    return res.status(200).json({ success: true, message: 'Events list loaded', events })
+  } catch (error) {
+    console.log(error)
+    return res.status(400).json({ success: false, message: error.message })
+  }
+}
+
+exports.admin_get_users = async (req, res) => {
+  try {
+    const users = await User.find()
+    return res.status(200).json({ success: true, message: 'Users list loaded', users })
+  } catch (error) {
+    console.log(error)
+    return res.status(400).json({ success: false, message: error.message })
+  }
+}
+
+
+

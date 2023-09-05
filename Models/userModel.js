@@ -29,6 +29,9 @@ const userModel = new mongoose.Schema({
     phone: {
         type: String,
     },
+    fcm: {
+        type: String,
+    },
     createdat: {
         type: Date,
         default: Date.now
